@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>のんびりアイランド</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;800&display=swap" rel="stylesheet">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* スクロール禁止 */
+            background-color: #4da6ff; /* 海の色 */
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            touch-action: none; /* スマホでのスワイプスクロール防止 */
+            user-select: none;
+        }
+
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* UIオーバーレイのスタイル */
+        .ui-layer {
+            position: absolute;
+            pointer-events: none; /* クリックをキャンバスに貫通させる */
+        }
+        
+        .interactive-ui {
+            pointer-events: auto;
+        }
+
+        /* ふわふわ浮くアニメーション */
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-5px); }
+            100% { transform: translateY(0px); }
+        }
+
+        /* ポップアップアニメーション */
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; }
+            70% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .inventory-slot {
+            transition: all 0.2s ease;
+        }
+        .inventory-slot.filled {
+            animation: popIn 0.3s ease forwards;
+        }
+
+        /* モバイルコントロール */
+        .control-btn {
+            background: rgba(255, 255, 255, 0.7);
+            border: 4px solid #f3f4f6;
+            border-radius: 50%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #4b5563;
+            transition: background 0.1s;
+        }
+        .control-btn:active {
+            background: rgba(200, 200, 200, 0.9);
+            transform: scale(0.95);
+        }
+
+        #dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 5px;
+            width: 150px;
+            height: 150px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ゲームキャンバス -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI レイヤー -->
+    <!-- 時計と日付 (左上) -->
+    <div class="ui-layer top-4 left-4 flex flex-col gap-2">
+        <div class="bg-yellow-50 text-yellow-800 px-4 py-2 rounded-2xl shadow-lg border-2 border-yellow-200 flex items-center gap-2" style="animation: float 4s ease-in-out infinite;">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            <span id="clock" class="text-xl font-extrabold tracking-wider">12:00</span>
+        </div>
+    </div>
+
+    <!-- ベル (右上) -->
+    <div class="ui-layer top-4 right-4">
+        <div class="bg-yellow-100 text-yellow-900 px-4 py-2 rounded-3xl shadow-lg border-2 border-yellow-300 flex items-center gap-2">
+            <div class="bg-yellow-400 rounded-full w-8 h-8 flex items-center justify-center text-white font-bold border-2 border-yellow-500">💰</div>
+            <span id="bells" class="text-xl font-extrabold">0</span>
+        </div>
+    </div>
+
+    <!-- 通知メッセージ -->
+    <div id="notification" class="ui-layer top-20 left-1/2 transform -translate-x-1/2 bg-white text-gray-800 px-6 py-3 rounded-full shadow-xl border-2 border-green-400 font-bold text-lg opacity-0 transition-opacity duration-300">
+        メッセージ
+    </div>
+
+    <!-- インベントリ (下部中央) -->
+    <div class="ui-layer bottom-4 left-1/2 transform -translate-x-1/2 md:bottom-8">
+        <div class="bg-green-100/90 p-3 rounded-3xl shadow-xl border-4 border-green-300 flex gap-2 backdrop-blur-sm">
+            <div class="inventory-slot w-12 h-12 md:w-16 md:h-16 bg-white rounded-2xl border-2 border-green-200 flex items-center justify-center shadow-inner text-2xl md:text-3xl" id="inv-0"></div>
+            <div class="inventory-slot w-12 h-12 md:w-16 md:h-16 bg-white rounded-2xl border-2 border-green-200 flex items-center justify-center shadow-inner text-2xl md:text-3xl" id="inv-1"></div>
+            <div class="inventory-slot w-12 h-12 md:w-16 md:h-16 bg-white rounded-2xl border-2 border-green-200 flex items-center justify-center shadow-inner text-2xl md:text-3xl" id="inv-2"></div>
+            <div class="inventory-slot w-12 h-12 md:w-16 md:h-16 bg-white rounded-2xl border-2 border-green-200 flex items-center justify-center shadow-inner text-2xl md:text-3xl" id="inv-3"></div>
+            <div class="inventory-slot w-12 h-12 md:w-16 md:h-16 bg-white rounded-2xl border-2 border-green-200 flex items-center justify-center shadow-inner text-2xl md:text-3xl" id="inv-4"></div>
+        </div>
+    </div>
+
+    <!-- モバイル用コントロール (画面サイズが小さい時のみ表示) -->
+    <div class="ui-layer bottom-4 left-4 interactive-ui md:hidden">
+        <div id="dpad">
+            <div></div>
+            <div class="control-btn" id="btn-up">▲</div>
+            <div></div>
+            <div class="control-btn" id="btn-left">◀</div>
+            <div class="flex items-center justify-center"><div class="w-4 h-4 bg-gray-300 rounded-full"></div></div>
+            <div class="control-btn" id="btn-right">▶</div>
+            <div></div>
+            <div class="control-btn" id="btn-down">▼</div>
+            <div></div>
+        </div>
+    </div>
+
+    <div class="ui-layer bottom-12 right-6 interactive-ui md:hidden">
+        <div class="control-btn w-20 h-20 bg-green-100 border-green-300 text-green-700 text-3xl" id="btn-a">
+            A
+        </div>
+    </div>
+
+    <script>
+        // --- ゲーム定数と設定 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let width, height;
+        const TILE_SIZE = 64;
+        const MAP_WIDTH = 2000;
+        const MAP_HEIGHT = 2000;
+
+        // キー入力状態
+        const keys = {
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+            w: false, s: false, a: false, d: false,
+            Space: false, // アクションキー
+            Enter: false
+        };
+
+        // モバイル入力状態
+        const touchInput = { x: 0, y: 0, action: false };
+        let actionTriggered = false;
+
+        // --- ユーティリティ ---
+        function resizeCanvas() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function showNotification(msg) {
+            const notif = document.getElementById('notification');
+            notif.innerText = msg;
+            notif.style.opacity = '1';
+            notif.style.transform = 'translate(-50%, 0)';
+            setTimeout(() => {
+                notif.style.opacity = '0';
+                notif.style.transform = 'translate(-50%, -20px)';
+            }, 2000);
+        }
+
+        // 時計の更新
+        function updateClock() {
+            const now = new Date();
+            let h = now.getHours();
+            let m = now.getMinutes();
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            h = h % 12 || 12;
+            document.getElementById('clock').innerText = `${ampm} ${h}:${m.toString().padStart(2, '0')}`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // --- ゲームクラス ---
+
+        class Camera {
+            constructor() {
+                this.x = 0;
+                this.y = 0;
+            }
+            follow(target) {
+                // 滑らかな追従
+                const targetX = target.x - width / 2;
+                const targetY = target.y - height / 2;
+                
+                // マップ境界の制限
+                this.x += (Math.max(0, Math.min(targetX, MAP_WIDTH - width)) - this.x) * 0.1;
+                this.y += (Math.max(0, Math.min(targetY, MAP_HEIGHT - height)) - this.y) * 0.1;
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color, type = 'dot') {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 6;
+                this.vy = (Math.random() - 0.5) * 6 - 2;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.03 + 0.02;
+                this.color = color;
+                this.size = Math.random() * 6 + 4;
+                this.type = type; // 'dot', 'leaf', 'star'
+                this.angle = Math.random() * Math.PI * 2;
+                this.vAngle = (Math.random() - 0.5) * 0.2;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.2; // 重力
+                this.angle += this.vAngle;
+                this.life -= this.decay;
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.globalAlpha = Math.max(0, this.life);
+                
+                if (this.type === 'leaf') {
+                    ctx.fillStyle = '#65a30d'; // 葉の色
+                    ctx.beginPath();
+                    ctx.ellipse(0, 0, this.size, this.size/2, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (this.type === 'star') {
+                    ctx.fillStyle = '#fbbf24'; // 星/ベルの色
+                    ctx.fillRect(-this.size/2, -this.size/2, this.size, this.size);
+                } else {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.size, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        class Item {
+            constructor(x, y, type) {
+                this.x = x;
+                this.y = y;
+                this.type = type; // 'apple', 'peach', 'bell'
+                this.w = 30;
+                this.h = 30;
+                this.vy = -5; // 跳ねる初期速度
+                this.groundY = y;
+                this.y = y - 60; // 木から落ちる開始位置
+                this.bounces = 0;
+            }
+            update() {
+                if (this.y < this.groundY) {
+                    this.y += this.vy;
+                    this.vy += 0.5; // 重力
+                } else {
+                    if (this.bounces < 2) {
+                        this.y = this.groundY;
+                        this.vy = -this.vy * 0.4;
+                        this.bounces++;
+                    } else {
+                        this.y = this.groundY;
+                        this.vy = 0;
+                    }
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // 影
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(0, this.groundY - this.y + 10, 15, 5, 0, 0, Math.PI*2);
+                ctx.fill();
+
+                if (this.type === 'apple') {
+                    // りんご
+                    ctx.fillStyle = '#ef4444';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    // 茎と葉
+                    ctx.fillStyle = '#8b5a2b';
+                    ctx.fillRect(-2, -16, 4, 6);
+                    ctx.fillStyle = '#22c55e';
+                    ctx.beginPath();
+                    ctx.ellipse(5, -14, 6, 3, Math.PI/4, 0, Math.PI*2);
+                    ctx.fill();
+                } else if (this.type === 'bell') {
+                    // ベル袋
+                    ctx.fillStyle = '#fef08a';
+                    ctx.beginPath();
+                    ctx.moveTo(0, -15);
+                    ctx.lineTo(-12, 10);
+                    ctx.lineTo(12, 10);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = '#ca8a04';
+                    ctx.beginPath();
+                    ctx.arc(0, 10, 12, 0, Math.PI);
+                    ctx.fill();
+                    ctx.fillStyle = '#b45309';
+                    ctx.font = '14px Arial';
+                    ctx.fillText('★', -7, 8);
+                }
+                
+                ctx.restore();
+            }
+        }
+
+        class Tree {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.w = 80;
+                this.h = 120;
+                this.hasFruit = Math.random() > 0.3;
+                this.fruitType = Math.random() > 0.8 ? 'bell' : 'apple';
+                this.shakeAmount = 0;
+                this.shakeTime = 0;
+                this.colW = 40; // 当たり判定用
+                this.colH = 20;
+            }
+            shake() {
+                if (this.shakeTime <= 0) {
+                    this.shakeTime = 30; // 揺れる時間フレーム
+                    // 葉っぱパーティクル
+                    for(let i=0; i<5; i++) {
+                        particles.push(new Particle(this.x, this.y - 80, '', 'leaf'));
+                    }
+                    
+                    if (this.hasFruit) {
+                        this.hasFruit = false;
+                        // フルーツを落とす
+                        const dropX = this.x + (Math.random() > 0.5 ? 40 : -40);
+                        items.push(new Item(dropX, this.y + 20, this.fruitType));
+                    }
+                }
+            }
+            update() {
+                if (this.shakeTime > 0) {
+                    this.shakeAmount = Math.sin(this.shakeTime * 0.5) * 10;
+                    this.shakeTime--;
+                } else {
+                    this.shakeAmount = 0;
+                }
+            }
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                
+                // 影
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(0, 10, 40, 15, 0, 0, Math.PI*2);
+                ctx.fill();
+
+                // 揺れ適用
+                ctx.translate(this.shakeAmount, 0);
+
+                // 幹
+                ctx.fillStyle = '#78350f';
+                ctx.beginPath();
+                ctx.moveTo(-15, 10);
+                ctx.lineTo(-10, -50);
+                ctx.lineTo(10, -50);
+                ctx.lineTo(15, 10);
+                ctx.fill();
+
+                // 葉っぱ（重なる円）
+                ctx.fillStyle = '#4ade80'; // 明るい緑
+                ctx.beginPath();
+                ctx.arc(0, -90, 45, 0, Math.PI*2);
+                ctx.arc(-30, -60, 40, 0, Math.PI*2);
+                ctx.arc(30, -60, 40, 0, Math.PI*2);
+                ctx.fill();
+
+                ctx.fillStyle = '#22c55e'; // 濃い緑（影用）
+                ctx.beginPath();
+                ctx.arc(0, -85, 35, 0, Math.PI*2);
+                ctx.arc(-20, -55, 30, 0, Math.PI*2);
+                ctx.arc(20, -55, 30, 0, Math.PI*2);
+                ctx.fill();
+
+                // フルーツ
+                if (this.hasFruit) {
+                    if (this.fruitType === 'apple') {
+                        ctx.fillStyle = '#ef4444';
+                        ctx.beginPath(); ctx.arc(-25, -60, 8, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.arc(25, -50, 8, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.arc(0, -80, 8, 0, Math.PI*2); ctx.fill();
+                    } else {
+                        ctx.fillStyle = '#fef08a'; // ベル色
+                        ctx.beginPath(); ctx.arc(-25, -60, 8, 0, Math.PI*2); ctx.fill();
+                        ctx.beginPath(); ctx.arc(25, -50, 8, 0, Math.PI*2); ctx.fill();
+                    }
+                }
+
+                ctx.restore();
+            }
+        }
+
+        class Player {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.speed = 5;
+                this.w = 40;
+                this.h = 60;
+                this.facing = 'down'; // 'up', 'down', 'left', 'right'
+                this.moving = false;
+                this.animFrame = 0;
+                this.inventory = [];
+                this.maxInventory = 5;
+                this.bells = 0;
+            }
+
+            update() {
+                let dx = 0;
+                let dy = 0;
+
+                // キーボード入力
+                if (keys.ArrowUp || keys.w) dy -= 1;
+                if (keys.ArrowDown || keys.s) dy += 1;
+                if (keys.ArrowLeft || keys.a) dx -= 1;
+                if (keys.ArrowRight || keys.d) dx += 1;
+
+                // タッチ入力のオーバーライド
+                if (touchInput.x !== 0 || touchInput.y !== 0) {
+                    dx = touchInput.x;
+                    dy = touchInput.y;
+                }
+
+                // 正規化 (斜め移動の速度調整)
+                if (dx !== 0 && dy !== 0) {
+                    const length = Math.sqrt(dx * dx + dy * dy);
+                    dx /= length;
+                    dy /= length;
+                }
+
+                if (dx > 0) this.facing = 'right';
+                if (dx < 0) this.facing = 'left';
+                if (dy > 0) this.facing = 'down';
+                if (dy < 0) this.facing = 'up';
+
+                this.moving = (dx !== 0 || dy !== 0);
+
+                // 次の位置
+                let nextX = this.x + dx * this.speed;
+                let nextY = this.y + dy * this.speed;
+
+                // 境界チェック (島の中だけ)
+                nextX = Math.max(100, Math.min(nextX, MAP_WIDTH - 100));
+                nextY = Math.max(100, Math.min(nextY, MAP_HEIGHT - 100));
+
+                // 衝突判定 (木)
+                let collision = false;
+                const pBox = { x: nextX - 15, y: nextY - 10, w: 30, h: 20 }; // 足元の判定
+
+                for (let tree of trees) {
+                    const tBox = { x: tree.x - tree.colW/2, y: tree.y - tree.colH/2, w: tree.colW, h: tree.colH };
+                    if (rectIntersect(pBox, tBox)) {
+                        collision = true;
+                        break;
+                    }
+                }
+
+                if (!collision) {
+                    this.x = nextX;
+                    this.y = nextY;
+                }
+
+                if (this.moving) {
+                    this.animFrame += 0.2;
+                } else {
+                    this.animFrame = 0;
+                }
+
+                // アクション処理
+                if ((keys.Space || keys.Enter || touchInput.action || actionTriggered) && !this.actionFired) {
+                    this.action();
+                    this.actionFired = true;
+                    actionTriggered = false; // モバイル用トリガーリセット
+                } else if (!keys.Space && !keys.Enter && !touchInput.action && !actionTriggered) {
+                    this.actionFired = false;
+                }
+            }
+
+            action() {
+                // 1. まず足元のアイテムを拾うかチェック
+                let pickedUp = false;
+                for (let i = items.length - 1; i >= 0; i--) {
+                    const item = items[i];
+                    const dist = Math.hypot(this.x - item.x, this.y - item.y);
+                    if (dist < 40) {
+                        if (item.type === 'bell') {
+                            this.bells += 100;
+                            document.getElementById('bells').innerText = this.bells;
+                            showNotification("100ベル手に入れた！");
+                            // キラキラパーティクル
+                            for(let p=0; p<10; p++) particles.push(new Particle(this.x, this.y, '', 'star'));
+                        } else {
+                            if (this.inventory.length < this.maxInventory) {
+                                this.inventory.push(item.type);
+                                updateInventoryUI();
+                                showNotification("リンゴを拾った！");
+                                // 取得パーティクル
+                                for(let p=0; p<8; p++) particles.push(new Particle(this.x, this.y, '#ffffff'));
+                            } else {
+                                showNotification("ポケットがいっぱいです！");
+                                return; // インベントリ満杯なら消さない
+                            }
+                        }
+                        items.splice(i, 1);
+                        pickedUp = true;
+                        break;
+                    }
+                }
+
+                if (pickedUp) return;
+
+                // 2. アイテムがなければ目の前の木を揺らす
+                let interactX = this.x;
+                let interactY = this.y;
+                const reach = 50;
+                if (this.facing === 'up') interactY -= reach;
+                if (this.facing === 'down') interactY += reach;
+                if (this.facing === 'left') interactX -= reach;
+                if (this.facing === 'right') interactX += reach;
+
+                for (let tree of trees) {
+                    const dist = Math.hypot(interactX - tree.x, interactY - tree.y);
+                    if (dist < 60) {
+                        tree.shake();
+                        break;
+                    }
+                }
+            }
+
+            draw(ctx) {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // 影
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.ellipse(0, 5, 20, 8, 0, 0, Math.PI*2);
+                ctx.fill();
+
+                // 歩行ボビング（上下の揺れ）
+                const bob = Math.sin(this.animFrame) * 3;
+                ctx.translate(0, -25 + bob);
+
+                // 体 (服)
+                ctx.fillStyle = '#3b82f6'; // 青い服
+                ctx.beginPath();
+                ctx.roundRect(-15, -5, 30, 25, 8);
+                ctx.fill();
+
+                // 腕
+                ctx.fillStyle = '#ffedd5'; // 肌色
+                const armSwing = Math.sin(this.animFrame) * 10;
+                // 左腕
+                ctx.save();
+                ctx.translate(-18, 0);
+                if(this.facing === 'left' || this.facing === 'right' || this.facing === 'up') ctx.rotate(armSwing * Math.PI / 180);
+                ctx.beginPath(); ctx.roundRect(-4, -4, 8, 18, 4); ctx.fill();
+                ctx.restore();
+                // 右腕
+                ctx.save();
+                ctx.translate(18, 0);
+                if(this.facing === 'left' || this.facing === 'right' || this.facing === 'up') ctx.rotate(-armSwing * Math.PI / 180);
+                ctx.beginPath(); ctx.roundRect(-4, -4, 8, 18, 4); ctx.fill();
+                ctx.restore();
+
+                // 頭
+                ctx.fillStyle = '#ffedd5';
+                ctx.beginPath();
+                ctx.arc(0, -20, 18, 0, Math.PI*2);
+                ctx.fill();
+
+                // 髪
+                ctx.fillStyle = '#451a03'; // 茶髪
+                ctx.beginPath();
+                ctx.arc(0, -22, 19, Math.PI, 0);
+                ctx.fill();
+                // 前髪
+                if (this.facing === 'down') {
+                    ctx.beginPath(); ctx.arc(0, -18, 19, Math.PI, 0); ctx.fill();
+                } else if (this.facing === 'left') {
+                    ctx.beginPath(); ctx.arc(-5, -18, 19, Math.PI, 0); ctx.fill();
+                } else if (this.facing === 'right') {
+                    ctx.beginPath(); ctx.arc(5, -18, 19, Math.PI, 0); ctx.fill();
+                }
+
+                // 顔
+                if (this.facing === 'down') {
+                    ctx.fillStyle = '#000';
+                    // 目
+                    ctx.beginPath(); ctx.arc(-6, -20, 2, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(6, -20, 2, 0, Math.PI*2); ctx.fill();
+                    // ほっぺ
+                    ctx.fillStyle = '#fca5a5';
+                    ctx.beginPath(); ctx.arc(-10, -15, 3, 0, Math.PI*2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(10, -15, 3, 0, Math.PI*2); ctx.fill();
+                } else if (this.facing === 'left') {
+                    ctx.fillStyle = '#000';
+                    ctx.beginPath(); ctx.arc(-10, -20, 2, 0, Math.PI*2); ctx.fill();
+                } else if (this.facing === 'right') {
+                    ctx.fillStyle = '#000';
+                    ctx.beginPath(); ctx.arc(10, -20, 2, 0, Math.PI*2); ctx.fill();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        // --- ゲーム状態 ---
+        let player;
+        let camera;
+        let trees = [];
+        let items = [];
+        let particles = [];
+
+        // 初期化
+        function init() {
+            player = new Player(MAP_WIDTH / 2, MAP_HEIGHT / 2);
+            camera = new Camera();
+
+            // 木をランダムに配置
+            for (let i = 0; i < 60; i++) {
+                let tx = 150 + Math.random() * (MAP_WIDTH - 300);
+                let ty = 150 + Math.random() * (MAP_HEIGHT - 300);
+                
+                // 木同士が近すぎないようにする
+                let tooClose = false;
+                for (let t of trees) {
+                    if (Math.hypot(tx - t.x, ty - t.y) < 100) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                if (!tooClose) trees.push(new Tree(tx, ty));
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ユーティリティ：矩形交差判定
+        function rectIntersect(r1, r2) {
+            return !(r2.x > r1.x + r1.w || 
+                     r2.x + r2.w < r1.x || 
+                     r2.y > r1.y + r1.h ||
+                     r2.y + r2.h < r1.y);
+        }
+
+        // UIのインベントリ更新
+        function updateInventoryUI() {
+            for (let i = 0; i < player.maxInventory; i++) {
+                const slot = document.getElementById(`inv-${i}`);
+                if (i < player.inventory.length) {
+                    // アイテムあり
+                    if (!slot.classList.contains('filled')) {
+                        slot.innerHTML = player.inventory[i] === 'apple' ? '🍎' : '🍑';
+                        slot.classList.add('filled');
+                        // 少し経ったらアニメーションクラスを外す
+                        setTimeout(() => slot.classList.remove('filled'), 300);
+                    }
+                } else {
+                    // 空
+                    slot.innerHTML = '';
+                    slot.classList.remove('filled');
+                }
+            }
+        }
+
+
+        // --- 入力ハンドリング ---
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+        });
+
+        // モバイルDパッドのイベント設定
+        const setupMobileControls = () => {
+            const btnUp = document.getElementById('btn-up');
+            const btnDown = document.getElementById('btn-down');
+            const btnLeft = document.getElementById('btn-left');
+            const btnRight = document.getElementById('btn-right');
+            const btnA = document.getElementById('btn-a');
+
+            const addTouch = (elem, dx, dy) => {
+                elem.addEventListener('touchstart', (e) => { e.preventDefault(); touchInput.x = dx; touchInput.y = dy; });
+                elem.addEventListener('touchend', (e) => { e.preventDefault(); touchInput.x = 0; touchInput.y = 0; });
+                elem.addEventListener('mousedown', (e) => { e.preventDefault(); touchInput.x = dx; touchInput.y = dy; });
+                elem.addEventListener('mouseup', (e) => { e.preventDefault(); touchInput.x = 0; touchInput.y = 0; });
+                elem.addEventListener('mouseleave', (e) => { touchInput.x = 0; touchInput.y = 0; });
+            };
+
+            addTouch(btnUp, 0, -1);
+            addTouch(btnDown, 0, 1);
+            addTouch(btnLeft, -1, 0);
+            addTouch(btnRight, 1, 0);
+
+            const addActionTouch = (elem) => {
+                const trigger = (e) => { e.preventDefault(); actionTriggered = true; };
+                elem.addEventListener('touchstart', trigger);
+                elem.addEventListener('mousedown', trigger);
+            };
+            addActionTouch(btnA);
+        };
+        setupMobileControls();
+
+        // --- 描画と更新のメインループ ---
+
+        function drawGrass(ctx, startX, startY) {
+            // 背景の緑
+            ctx.fillStyle = '#a3e635'; // ベースの芝生色
+            ctx.fillRect(startX, startY, width, height);
+
+            // 地面の模様（簡単なチェッカーボード風のドット）
+            ctx.fillStyle = '#84cc16';
+            const offsetX = startX % 40;
+            const offsetY = startY % 40;
+            
+            for (let x = startX - offsetX; x < startX + width; x += 40) {
+                for (let y = startY - offsetY; y < startY + height; y += 40) {
+                    if ((Math.floor(x/40) + Math.floor(y/40)) % 2 === 0) {
+                        ctx.beginPath();
+                        ctx.arc(x + 20, y + 20, 4, 0, Math.PI*2);
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // 島の境界線 (水際)を描画
+            ctx.lineWidth = 20;
+            ctx.strokeStyle = '#fde047'; // 砂浜の色
+            ctx.strokeRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        }
+
+        function gameLoop() {
+            // 更新
+            player.update();
+            camera.follow(player);
+
+            items.forEach(i => i.update());
+            trees.forEach(t => t.update());
+            
+            for(let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                if(particles[i].life <= 0) particles.splice(i, 1);
+            }
+
+            // --- 描画 ---
+            // 画面クリア (海)
+            ctx.fillStyle = '#60a5fa';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.save();
+            // カメラ適用
+            ctx.translate(Math.floor(-camera.x), Math.floor(-camera.y));
+
+            // 地面（表示領域のみ計算して描画）
+            drawGrass(ctx, camera.x, camera.y);
+
+            // 描画順序のためにY座標でソート (Zソート)
+            const renderables = [
+                player,
+                ...trees,
+                ...items
+            ];
+            renderables.sort((a, b) => a.y - b.y);
+
+            // 描画
+            renderables.forEach(r => r.draw(ctx));
+
+            // パーティクルは一番上
+            particles.forEach(p => p.draw(ctx));
+
+            ctx.restore();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ゲーム開始
+        window.onload = () => {
+            init();
+            showNotification("のんびりアイランドへようこそ！");
+        };
+
+    </script>
+</body>
+</html>
