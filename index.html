@@ -175,12 +175,14 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
+        let notificationTimer;
         function showNotification(msg) {
+            clearTimeout(notificationTimer);
             const notif = document.getElementById('notification');
             notif.innerText = msg;
             notif.style.opacity = '1';
             notif.style.transform = 'translate(-50%, 0)';
-            setTimeout(() => {
+            notificationTimer = setTimeout(() => {
                 notif.style.opacity = '0';
                 notif.style.transform = 'translate(-50%, -20px)';
             }, 2000);
